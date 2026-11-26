@@ -900,12 +900,19 @@
   function buildOptions(correct, distractors, fallback) {
     var labels = [];
     uniquePush(labels, correct);
-    (distractors || []).forEach(function (d) { uniquePush(labels, d); });
+    // 从全部干扰项里随机抽 3 个，而不是固定取词库前三个；
+    // 这样同一个词重复出现时，选项组合和顺序都会变化。
+    var pool = shuffle((distractors || []).filter(function (d) {
+      return String(d || "").trim() && String(d).trim() !== String(correct).trim();
+    }));
+    for (var i = 0; i < pool.length && labels.length < 4; i++) {
+      uniquePush(labels, pool[i]);
+    }
     (fallback || []).forEach(function (d) {
       if (labels.length < 4) uniquePush(labels, d);
     });
     while (labels.length < 4) labels.push("以上都不是 " + (labels.length + 1));
-    var picked = shuffle(labels.slice(0, 4));
+    var picked = shuffle(labels);
     if (picked.indexOf(correct) < 0) picked[0] = correct;
     return picked.map(function (label) {
       return { label: label, correct: label === correct };
@@ -1071,6 +1078,30 @@
     });
   }
 
+  var chimeCtx = null;
+  function playCorrectChime() {
+    try {
+      var AudioCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtor) return;
+      chimeCtx = chimeCtx || new AudioCtor();
+      if (chimeCtx.state === "suspended") chimeCtx.resume();
+      var now = chimeCtx.currentTime;
+      [[784, 0, 0.14], [1174.66, 0.1, 0.22]].forEach(function (note) {
+        var osc = chimeCtx.createOscillator();
+        var gain = chimeCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(note[0], now + note[1]);
+        gain.gain.setValueAtTime(0.0001, now + note[1]);
+        gain.gain.exponentialRampToValueAtTime(0.1, now + note[1] + 0.012);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + note[1] + note[2]);
+        osc.connect(gain);
+        gain.connect(chimeCtx.destination);
+        osc.start(now + note[1]);
+        osc.stop(now + note[1] + note[2] + 0.02);
+      });
+    } catch (e) {}
+  }
+
   function answerQuestion(optionIndex) {
     if (!S.session || S.session.finished || S.session.feedback) return;
     var q = ensureCurrent();
@@ -1127,6 +1158,7 @@
                 : "，答错已清零，需重新连续答对 3 次"))
           : (word ? store.dueText(word) : ""))
     };
+    if (option.correct && !isFiller) playCorrectChime();
     render();
     var panel = document.querySelector(".feedback-panel");
     if (panel && panel.scrollIntoView) {
